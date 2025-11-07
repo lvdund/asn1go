@@ -3,7 +3,6 @@ package uper
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"math/bits"
 
@@ -347,25 +346,115 @@ func (ur *UperReader) ReadEnumerate(c Constraint, e bool) (v uint64, err error) 
 	return
 }
 
+// readOctetsWithIndefiniteLength reads octets using indefinite length encoding
+func (ur *UperReader) readOctetsWithIndefiniteLength() (byteArray []byte, err error) {
+	defer func() {
+		err = utils.WrapError("readOctetsWithIndefiniteLength", err)
+	}()
+
+	var result bytes.Buffer
+	more := true
+
+	for more {
+		var first uint64
+		if first, err = ur.readValue(8); err != nil {
+			return
+		}
+
+		if (first & POW_7) == 0 {
+			// 7-bit value: final fragment
+			length := first & 0x7F
+			if length == 0 {
+				more = false
+				break
+			}
+			var fragment []byte
+			if fragment, err = ur.ReadBits(uint(length * 8)); err != nil {
+				return
+			}
+			result.Write(fragment)
+			more = false
+		} else if (first & POW_6) == 0 {
+			// 14-bit value: final fragment
+			var second uint64
+			if second, err = ur.readValue(8); err != nil {
+				return
+			}
+			length := ((first & 63) << 8) | second
+			var fragment []byte
+			if fragment, err = ur.ReadBits(uint(length * 8)); err != nil {
+				return
+			}
+			result.Write(fragment)
+			more = false
+		} else {
+			// Fragment header: 0xC0 + idx
+			idx := first & 63
+			if idx < 1 || idx > 4 {
+				err = ErrInvalidLength
+				return
+			}
+			length := POW_14 * idx
+			var fragment []byte
+			if fragment, err = ur.ReadBits(uint(length * 8)); err != nil {
+				return
+			}
+			result.Write(fragment)
+			// Continue reading more fragments
+		}
+	}
+
+	byteArray = result.Bytes()
+	return
+}
+
 func (ur *UperReader) ReadChoice(uBound uint64, e bool) (v uint64, err error) {
 	defer func() {
 		err = utils.WrapError("ReadChoice", err)
 	}()
 
+	var isExtension bool
+
+	// Read extension bit (if extensible)
 	if e {
-		var exBit bool
-		if exBit, err = ur.ReadBool(); err != nil {
-			return
-		}
-		if exBit {
-			err = fmt.Errorf("Choice extension not supported")
+		if isExtension, err = ur.ReadBool(); err != nil {
 			return
 		}
 	}
-	var tmp uint64
-	if tmp, err = ur.readConstraintValue(uBound + 1); err != nil {
-		return
+
+	var idx uint64
+
+	// Handle extension alternative
+	if isExtension {
+		// Read large index flag
+		var isLarge bool
+		if isLarge, err = ur.ReadBool(); err != nil {
+			return
+		}
+
+		if !isLarge {
+			// Small extension index (≤63): read 6 bits
+			if idx, err = ur.readValue(6); err != nil {
+				return
+			}
+		} else {
+			// Large extension index (>63): read indefinite length octets
+			var hexValue []byte
+			if hexValue, err = ur.readOctetsWithIndefiniteLength(); err != nil {
+				return
+			}
+			length := len(hexValue)
+			for i := 0; i < length; i++ {
+				idx = (idx << 8) | uint64(hexValue[i])
+			}
+		}
+	} else {
+		// Root alternative: read constrained value
+		if idx, err = ur.readConstraintValue(uBound + 1); err != nil {
+			return
+		}
 	}
-	v = tmp + 1
+
+	v = idx + 1 // Convert back to 1-based
 	return
 }

@@ -292,7 +292,7 @@ func (aw *AperWriter) WriteInteger(v int64, c *Constraint, e bool) (err error) {
 
 	if v < 0 {
 		y := v >> 63
-		unsignedValue = uint64((v^y)-y) - 1
+		unsignedValue = uint64(((v ^ y) - y)) - 1
 	}
 	if sRange <= 0 {
 		unsignedValue >>= 7
@@ -316,33 +316,20 @@ func (aw *AperWriter) WriteInteger(v int64, c *Constraint, e bool) (err error) {
 		unsignedValueRange := uint64(sRange - 1)
 		bitLen := bits.Len64(unsignedValueRange)
 		byteLen := uint((bitLen + 7) / 8)
-
-		var bitLenngth int
-		//if byteLen is a power of 2, use its bit position,
-		// otherwise use the next power of 2's bit position
-		if byteLen == 0 {
-			bitLenngth = 0
-		} else if byteLen&(byteLen-1) == 0 {
-			bitLenngth = bits.Len(uint(byteLen)) - 1
-		} else { // byteLen is not a power of 2, round up
-			bitLenngth = bits.Len(uint(byteLen))
-		}
-
+		bitLenngth := bits.Len(uint(int(byteLen)))
 		if err := aw.writeValue(uint64(rawLength-1), uint(bitLenngth)); err != nil {
 			return err
 		}
 	}
 	rawLength *= 8
 	aw.align()
-	// if sRange < 0 {
-	// 	mask := int64(1<<rawLength - 1)
-	// 	return aw.writeValue(uint64(v&mask), rawLength)
-	// } else {
-	// 	v -= lb
-	// 	return aw.writeValue(uint64(v), rawLength)
-	// }
-	v -= lb
-	return aw.writeValue(uint64(v), rawLength)
+	if sRange < 0 {
+		mask := int64(1<<rawLength - 1)
+		return aw.writeValue(uint64(v&mask), rawLength)
+	} else {
+		v -= lb
+		return aw.writeValue(uint64(v), rawLength)
+	}
 }
 
 func (aw *AperWriter) WriteChoice(v uint64, uBound uint64, e bool) (err error) {

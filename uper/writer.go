@@ -332,25 +332,118 @@ func (uw *UperWriter) WriteInteger(v int64, c *Constraint, e bool) (err error) {
 	return uw.writeValue(uint64(v), rawLength*8)
 }
 
+// writeOctetsWithIndefiniteLength writes octets using indefinite length encoding
+func (uw *UperWriter) writeOctetsWithIndefiniteLength(byteArray []byte) (err error) {
+	defer func() {
+		err = utils.WrapError("writeOctetsWithIndefiniteLength", err)
+	}()
+
+	lenReminder := uint64(len(byteArray))
+	locFragment := 0
+
+	// Write fragments of POW_14 size
+	for lenReminder >= POW_14 {
+		idx := uint64(4)
+		for idx > 0 {
+			if lenReminder >= POW_14*idx {
+				break
+			}
+			idx--
+		}
+
+		lenFragment := POW_14 * idx
+
+		// Write fragment header: 0xC0 + idx (8 bits)
+		if err = uw.writeValue(0xC0+idx, 8); err != nil {
+			return
+		}
+
+		// Write fragment data
+		if err = uw.WriteBits(byteArray[locFragment:locFragment+int(lenFragment)], uint(lenFragment*8)); err != nil {
+			return
+		}
+
+		lenReminder -= lenFragment
+		locFragment += int(lenFragment)
+	}
+
+	// Write final fragment
+	if lenReminder >= POW_7 {
+		// Write as 16 bits with leading '10'
+		if err = uw.writeValue(0x8000+lenReminder, 16); err != nil {
+			return
+		}
+	} else {
+		// Write as 8 bits with leading '0'
+		if err = uw.writeValue(lenReminder, 8); err != nil {
+			return
+		}
+	}
+
+	// Write remaining data
+	if lenReminder > 0 {
+		if err = uw.WriteBits(byteArray[locFragment:], uint(lenReminder*8)); err != nil {
+			return
+		}
+	}
+
+	return
+}
+
 func (uw *UperWriter) WriteChoice(v uint64, uBound uint64, e bool) (err error) {
 	defer func() {
 		err = utils.WrapError("WriteChoice", err)
 	}()
 	if v < 1 {
-		err = fmt.Errorf("Choice must be larger than 1")
-		return
-	}
-	v -= 1
-	if v > uBound {
-		err = fmt.Errorf("Choice extension not supported")
+		err = fmt.Errorf("Choice must be >= 1")
 		return
 	}
 
-	if e && v > uBound {
-		if err = uw.WriteBool(Zero); err != nil {
+	idx := v - 1 // Convert to 0-based index
+	isExtension := idx > uBound
+
+	// Write extension bit (if extensible)
+	if e {
+		if err = uw.WriteBool(isExtension); err != nil {
 			return
 		}
 	}
-	err = uw.writeConstraintValue(uBound+1, v)
+
+	// Handle extension alternative
+	if isExtension {
+		if !e {
+			err = fmt.Errorf("Choice extension not supported")
+			return
+		}
+
+		// Write large index flag
+		isLarge := idx > 63
+		if err = uw.WriteBool(isLarge); err != nil {
+			return
+		}
+
+		// Encode extension index
+		if !isLarge {
+			// Small extension index (≤63): encode in 6 bits
+			err = uw.writeValue(idx, 6)
+		} else {
+			// Large extension index (>63): encode as indefinite length octets
+			length := uint((bits.Len64(idx) + 7) >> 3)
+			if length == 0 {
+				length = 1
+			}
+			hexValue := make([]byte, length)
+			tempIdx := idx
+			for i := int(length) - 1; i >= 0; i-- {
+				hexValue[i] = byte(tempIdx & 0xFF)
+				tempIdx >>= 8
+			}
+			err = uw.writeOctetsWithIndefiniteLength(hexValue)
+		}
+		return
+	}
+
+	// Root alternative: use constrained value encoding
+	err = uw.writeConstraintValue(uBound+1, idx)
 	return
 }

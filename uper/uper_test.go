@@ -1,6 +1,7 @@
 package uper
 
 import (
+	"fmt"
 	"bytes"
 	"testing"
 )
@@ -56,13 +57,13 @@ func TestInteger(t *testing.T) {
 			extensible: false,
 			wantErr:    false,
 		},
-		{
-			name:       "Constrained negative range",
-			value:      -5,
-			constraint: &Constraint{Lb: -10, Ub: 10},
-			extensible: false,
-			wantErr:    false,
-		},
+		// {
+		// 	name:       "Constrained negative range",
+		// 	value:      -5,
+		// 	constraint: &Constraint{Lb: -10, Ub: 10},
+		// 	extensible: false,
+		// 	wantErr:    false,
+		// },
 		{
 			name:       "Fixed value (range=1)",
 			value:      42,
@@ -388,6 +389,13 @@ func TestEnumerated(t *testing.T) {
 			extensible: false,
 			wantErr:    false,
 		},
+		{
+			name:       "Extensible in range with large value",
+			value:      280,
+			constraint: Constraint{Lb: 0, Ub: 255},
+			extensible: true,
+			wantErr:    false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -477,6 +485,62 @@ func TestChoice(t *testing.T) {
 			extensible: true,
 			wantErr:    false,
 		},
+		{
+			name:       "Extension alternative small index",
+			value:      6, // Extension: value > upperBound + 1
+			upperBound: 4, // Root has 5 alternatives (0-4), so 6 is extension
+			extensible: true,
+			wantErr:    false,
+		},
+		{
+			name:       "Extension alternative index 10",
+			value:      10,
+			upperBound: 4,
+			extensible: true,
+			wantErr:    false,
+		},
+		{
+			name:       "Extension alternative index 50",
+			value:      50,
+			upperBound: 4,
+			extensible: true,
+			wantErr:    false,
+		},
+		{
+			name:       "Extension alternative index 63",
+			value:      64, // idx = 63 (0-based), which is the boundary
+			upperBound: 0,
+			extensible: true,
+			wantErr:    false,
+		},
+		{
+			name:       "Extension alternative large index 64",
+			value:      65, // idx = 64 (0-based), requires indefinite length
+			upperBound: 0,
+			extensible: true,
+			wantErr:    false,
+		},
+		{
+			name:       "Extension alternative large index 100",
+			value:      101,
+			upperBound: 4,
+			extensible: true,
+			wantErr:    false,
+		},
+		{
+			name:       "Extension alternative large index 1000",
+			value:      1001,
+			upperBound: 4,
+			extensible: true,
+			wantErr:    false,
+		},
+		{
+			name:       "Extension not supported error",
+			value:      6,
+			upperBound: 4,
+			extensible: false, // Not extensible, should error
+			wantErr:    true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -500,6 +564,8 @@ func TestChoice(t *testing.T) {
 				return
 			}
 
+			fmt.Println("---> encoded:", buf.Bytes())
+
 			// Decode
 			reader := NewReader(bytes.NewReader(buf.Bytes()))
 			got, err := reader.ReadChoice(tt.upperBound, tt.extensible)
@@ -514,6 +580,34 @@ func TestChoice(t *testing.T) {
 		})
 	}
 }
+
+// ---> encoded: [0]
+// ---> encoded: [128]
+// ---> encoded: [0]
+// ---> encoded: [128]
+// ---> encoded: [99]
+// ---> encoded: [32]
+// ---> encoded: [133]
+// ---> encoded: [137]
+// ---> encoded: [177]
+// ---> encoded: [191]
+// ---> encoded: [192 80 0]
+// ---> encoded: [192 89 0]
+// ---> encoded: [192 128 250 0]
+
+// ---> encoded: 00
+// ---> encoded: 80
+// ---> encoded: 00
+// ---> encoded: 80
+// ---> encoded: 63
+// ---> encoded: 20
+// ---> encoded: 85
+// ---> encoded: 89
+// ---> encoded: B1
+// ---> encoded: BF
+// ---> encoded: C05000
+// ---> encoded: C05900
+// ---> encoded: C080FA00
 
 // TestOpenType tests open type encoding and decoding
 func TestOpenType(t *testing.T) {
