@@ -782,3 +782,87 @@ func TestBitstreamReader_readByte(t *testing.T) {
 		t.Error("readByte should return non-zero value")
 	}
 }
+
+// TestBoolean tests BOOLEAN encoding and decoding
+func TestBoolean(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   bool
+		wantErr bool
+	}{
+		{
+			name:    "Boolean true",
+			value:   true,
+			wantErr: false,
+		},
+		{
+			name:    "Boolean false",
+			value:   false,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Encode
+			buf := new(bytes.Buffer)
+			writer := NewWriter(buf)
+			err := writer.WriteBoolean(tt.value)
+			if err != nil {
+				writer.Close()
+			} else {
+				err = writer.Close()
+			}
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("WriteBoolean() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+
+			// Decode
+			reader := NewReader(buf)
+			got, err := reader.ReadBoolean()
+			if err != nil {
+				t.Errorf("ReadBoolean() error = %v", err)
+				return
+			}
+
+			if got != tt.value {
+				t.Errorf("ReadBoolean() = %v, want %v", got, tt.value)
+			}
+		})
+	}
+}
+
+// TestBooleanMultiple tests encoding/decoding multiple BOOLEAN values in sequence
+func TestBooleanMultiple(t *testing.T) {
+	values := []bool{true, false, true, true, false, false, true, false}
+
+	// Encode multiple booleans
+	buf := new(bytes.Buffer)
+	writer := NewWriter(buf)
+	for i, val := range values {
+		if err := writer.WriteBoolean(val); err != nil {
+			t.Fatalf("WriteBoolean()[%d] error = %v", i, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Decode multiple booleans
+	reader := NewReader(buf)
+	for i, expected := range values {
+		got, err := reader.ReadBoolean()
+		if err != nil {
+			t.Errorf("ReadBoolean()[%d] error = %v", i, err)
+			continue
+		}
+		if got != expected {
+			t.Errorf("ReadBoolean()[%d] = %v, want %v", i, got, expected)
+		}
+	}
+}

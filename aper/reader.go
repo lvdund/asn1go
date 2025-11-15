@@ -377,3 +377,13 @@ func (ar *AperReader) ReadChoice(uBound uint64, e bool) (v uint64, err error) {
 	v = tmp + 1
 	return
 }
+
+// ReadBoolean decodes an ASN.1 BOOLEAN value according to APER rules.
+// A BOOLEAN is decoded from a single bit: 1 for true, 0 for false.
+func (ar *AperReader) ReadBoolean() (value bool, err error) {
+	defer func() {
+		err = utils.WrapError("ReadBoolean", err)
+	}()
+	value, err = ar.ReadBool()
+	return
+}

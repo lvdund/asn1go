@@ -354,3 +354,13 @@ func (aw *AperWriter) WriteChoice(v uint64, uBound uint64, e bool) (err error) {
 	err = aw.writeConstraintValue(uBound+1, v)
 	return
 }
+
+// WriteBoolean encodes an ASN.1 BOOLEAN value according to APER rules.
+// A BOOLEAN is encoded as a single bit: 1 for true, 0 for false.
+func (aw *AperWriter) WriteBoolean(value bool) (err error) {
+	defer func() {
+		err = utils.WrapError("WriteBoolean", err)
+	}()
+	err = aw.WriteBool(value)
+	return
+}

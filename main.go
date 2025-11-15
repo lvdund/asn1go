@@ -1,2 +1,0 @@
-package asn1go
-

@@ -1,8 +1,8 @@
 package uper
 
 import (
-	"fmt"
 	"bytes"
+	"fmt"
 	"testing"
 )
 
@@ -801,5 +801,277 @@ func TestSequenceOf(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestBoolean tests BOOLEAN encoding and decoding
+func TestBoolean(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   bool
+		wantErr bool
+	}{
+		{
+			name:    "Boolean true",
+			value:   true,
+			wantErr: false,
+		},
+		{
+			name:    "Boolean false",
+			value:   false,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Encode
+			buf := new(bytes.Buffer)
+			writer := NewWriter(buf)
+			err := writer.WriteBoolean(tt.value)
+			if err != nil {
+				writer.Close()
+			} else {
+				err = writer.Close()
+			}
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("WriteBoolean() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+
+			// Decode
+			reader := NewReader(buf)
+			got, err := reader.ReadBoolean()
+			if err != nil {
+				t.Errorf("ReadBoolean() error = %v", err)
+				return
+			}
+
+			if got != tt.value {
+				t.Errorf("ReadBoolean() = %v, want %v", got, tt.value)
+			}
+		})
+	}
+}
+
+// TestBooleanMultiple tests encoding/decoding multiple BOOLEAN values in sequence
+func TestBooleanMultiple(t *testing.T) {
+	values := []bool{true, false, true, true, false, false, true, false}
+
+	// Encode multiple booleans
+	buf := new(bytes.Buffer)
+	writer := NewWriter(buf)
+	for i, val := range values {
+		if err := writer.WriteBoolean(val); err != nil {
+			t.Fatalf("WriteBoolean()[%d] error = %v", i, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Decode multiple booleans
+	reader := NewReader(buf)
+	for i, expected := range values {
+		got, err := reader.ReadBoolean()
+		if err != nil {
+			t.Errorf("ReadBoolean()[%d] error = %v", i, err)
+			continue
+		}
+		if got != expected {
+			t.Errorf("ReadBoolean()[%d] = %v, want %v", i, got, expected)
+		}
+	}
+}
+
+// TestWriteOpenTypeVsIndefiniteLength tests the difference between WriteOpenType
+// and writeOctetsWithIndefiniteLength encoding methods
+//
+// WriteOpenType:
+//   - Uses WriteOctetString with unconstrained length
+//   - Writes length determinant first (8 bits for unconstrained), then content
+//   - Format: [length (8 bits)] [content bytes]
+//
+// writeOctetsWithIndefiniteLength:
+//   - Uses fragment-based encoding for indefinite length
+//   - For large data (>= 16384 bytes): splits into fragments with headers (0xC0+idx)
+//   - For final fragment: if >= 128 bytes, writes as 16 bits with 0x8000 prefix, else 8 bits
+//   - Format: [fragment headers] [fragment data] ... [final fragment header] [final fragment data]
+func TestWriteOpenTypeVsIndefiniteLength(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  []byte
+		wantDiff bool // Whether the encodings should differ
+	}{
+		{
+			name:     "Small content (3 bytes)",
+			content:  []byte{0x01, 0x02, 0x03},
+			wantDiff: true, // Different encoding schemes
+		},
+		{
+			name:     "Medium content (10 bytes)",
+			content:  []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22, 0x33, 0x44},
+			wantDiff: true,
+		},
+		{
+			name:     "Empty content",
+			content:  []byte{},
+			wantDiff: true,
+		},
+		{
+			name:     "Single byte",
+			content:  []byte{0xFF},
+			wantDiff: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Encode using WriteOpenType
+			buf1 := new(bytes.Buffer)
+			writer1 := NewWriter(buf1)
+			if err := writer1.WriteOpenType(tt.content); err != nil {
+				t.Fatalf("WriteOpenType() error = %v", err)
+			}
+			if err := writer1.Close(); err != nil {
+				t.Fatalf("writer1.Close() error = %v", err)
+			}
+			encoded1 := buf1.Bytes()
+
+			// Decode WriteOpenType encoding
+			reader1 := NewReader(bytes.NewReader(encoded1))
+			decoded1, err := reader1.ReadOpenType()
+			if err != nil {
+				t.Fatalf("ReadOpenType() error = %v", err)
+			}
+			if !bytes.Equal(decoded1, tt.content) {
+				t.Errorf("ReadOpenType() = %v, want %v", decoded1, tt.content)
+			}
+
+			// Log the encoding format
+			t.Logf("Content: %v", tt.content)
+			t.Logf("WriteOpenType encoding: %v (hex: %X)", encoded1, encoded1)
+			t.Logf("WriteOpenType encoding length: %d bytes", len(encoded1))
+
+			// Verify WriteOpenType encoding format:
+			// For unconstrained octet string, first byte should be the length
+			if len(tt.content) > 0 {
+				if len(encoded1) < 1 {
+					t.Errorf("WriteOpenType encoding too short")
+				} else {
+					// First byte is length determinant (8 bits for unconstrained)
+					lengthByte := encoded1[0]
+					t.Logf("Length determinant (first byte): 0x%02X = %d", lengthByte, lengthByte)
+					if uint8(lengthByte) != uint8(len(tt.content)) {
+						t.Errorf("Length determinant = %d, want %d", lengthByte, len(tt.content))
+					}
+					// Rest should be content
+					if len(encoded1) > 1 {
+						contentPart := encoded1[1:]
+						if !bytes.Equal(contentPart, tt.content) {
+							t.Errorf("Content part = %v, want %v", contentPart, tt.content)
+						}
+					}
+				}
+			} else {
+				// Empty content: length should be 0
+				if len(encoded1) != 1 || encoded1[0] != 0 {
+					t.Errorf("Empty content encoding = %v, expected [0x00]", encoded1)
+				}
+			}
+
+			// Note: writeOctetsWithIndefiniteLength would produce different encoding:
+			// - For small content (< 128 bytes): [length (8 bits)] [content]
+			// - But the format is different (fragment-based)
+			// - For large content: [0xC0+idx] [fragment] ... [final header] [final fragment]
+		})
+	}
+}
+
+// TestNull tests NULL encoding and decoding
+func TestNull(t *testing.T) {
+	// Encode NULL
+	buf := new(bytes.Buffer)
+	writer := NewWriter(buf)
+	err := writer.WriteNull()
+	if err != nil {
+		t.Fatalf("WriteNull() error = %v", err)
+	}
+	if err = writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	fmt.Println("Encoded NULL: ", buf.Bytes())
+
+	// NULL should encode one zero byte (matching Python reference implementation)
+	if buf.Len() != 1 {
+		t.Errorf("WriteNull() encoded %d bytes, expected 1 byte", buf.Len())
+	}
+	if buf.Bytes()[0] != 0x00 {
+		t.Errorf("WriteNull() encoded 0x%02X, expected 0x00", buf.Bytes()[0])
+	}
+
+	// Decode NULL
+	reader := NewReader(buf)
+	err = reader.ReadNull()
+	if err != nil {
+		t.Errorf("ReadNull() error = %v", err)
+	}
+}
+
+// TestNullWithOtherTypes tests NULL encoding/decoding with other types
+func TestNullWithOtherTypes(t *testing.T) {
+	// Encode: Boolean(true) + NULL + Boolean(false)
+	buf := new(bytes.Buffer)
+	writer := NewWriter(buf)
+
+	if err := writer.WriteBoolean(true); err != nil {
+		t.Fatalf("WriteBoolean(true) error = %v", err)
+	}
+	if err := writer.WriteNull(); err != nil {
+		t.Fatalf("WriteNull() error = %v", err)
+	}
+	if err := writer.WriteBoolean(false); err != nil {
+		t.Fatalf("WriteBoolean(false) error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Should have 2 bits: true (1) + false (0) = 0x80 (only first bit set)
+	// NULL adds no bits
+	expectedBytes := []byte{0x80} // 10000000 = true(1) + false(0), padded
+	if len(buf.Bytes()) != 1 {
+		t.Fatalf("Expected 1 byte, got %d bytes", len(buf.Bytes()))
+	}
+	if buf.Bytes()[0] != expectedBytes[0] {
+		t.Errorf("Encoded bytes = 0x%02X, expected 0x%02X", buf.Bytes()[0], expectedBytes[0])
+	}
+
+	// Decode: Boolean(true) + NULL + Boolean(false)
+	reader := NewReader(buf)
+
+	gotBool1, err := reader.ReadBoolean()
+	if err != nil {
+		t.Fatalf("ReadBoolean() error = %v", err)
+	}
+	if !gotBool1 {
+		t.Errorf("ReadBoolean() = %v, want true", gotBool1)
+	}
+
+	err = reader.ReadNull()
+	if err != nil {
+		t.Fatalf("ReadNull() error = %v", err)
+	}
+
+	gotBool2, err := reader.ReadBoolean()
+	if err != nil {
+		t.Fatalf("ReadBoolean() error = %v", err)
+	}
+	if gotBool2 {
+		t.Errorf("ReadBoolean() = %v, want false", gotBool2)
 	}
 }

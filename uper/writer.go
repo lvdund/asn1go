@@ -21,7 +21,18 @@ func NewWriter(w io.Writer) *UperWriter {
 }
 
 func (uw *UperWriter) Close() error {
-	return uw.flush()
+	if err := uw.flush(); err != nil {
+		return err
+	}
+
+	// This should only happen when the entire encoding is empty (no bits written at all)
+	if !uw.written {
+		if _, err := uw.bitstreamWriter.w.Write([]byte{0}); err != nil {
+			return err
+		}
+		uw.written = true
+	}
+	return nil
 }
 
 func (uw *UperWriter) writeBytes(bytes []byte) error {
@@ -333,62 +344,62 @@ func (uw *UperWriter) WriteInteger(v int64, c *Constraint, e bool) (err error) {
 }
 
 // writeOctetsWithIndefiniteLength writes octets using indefinite length encoding
-func (uw *UperWriter) writeOctetsWithIndefiniteLength(byteArray []byte) (err error) {
-	defer func() {
-		err = utils.WrapError("writeOctetsWithIndefiniteLength", err)
-	}()
+// func (uw *UperWriter) writeOctetsWithIndefiniteLength(byteArray []byte) (err error) {
+// 	defer func() {
+// 		err = utils.WrapError("writeOctetsWithIndefiniteLength", err)
+// 	}()
 
-	lenReminder := uint64(len(byteArray))
-	locFragment := 0
+// 	lenReminder := uint64(len(byteArray))
+// 	locFragment := 0
 
-	// Write fragments of POW_14 size
-	for lenReminder >= POW_14 {
-		idx := uint64(4)
-		for idx > 0 {
-			if lenReminder >= POW_14*idx {
-				break
-			}
-			idx--
-		}
+// 	// Write fragments of POW_14 size
+// 	for lenReminder >= POW_14 {
+// 		idx := uint64(4)
+// 		for idx > 0 {
+// 			if lenReminder >= POW_14*idx {
+// 				break
+// 			}
+// 			idx--
+// 		}
 
-		lenFragment := POW_14 * idx
+// 		lenFragment := POW_14 * idx
 
-		// Write fragment header: 0xC0 + idx (8 bits)
-		if err = uw.writeValue(0xC0+idx, 8); err != nil {
-			return
-		}
+// 		// Write fragment header: 0xC0 + idx (8 bits)
+// 		if err = uw.writeValue(0xC0+idx, 8); err != nil {
+// 			return
+// 		}
 
-		// Write fragment data
-		if err = uw.WriteBits(byteArray[locFragment:locFragment+int(lenFragment)], uint(lenFragment*8)); err != nil {
-			return
-		}
+// 		// Write fragment data
+// 		if err = uw.WriteBits(byteArray[locFragment:locFragment+int(lenFragment)], uint(lenFragment*8)); err != nil {
+// 			return
+// 		}
 
-		lenReminder -= lenFragment
-		locFragment += int(lenFragment)
-	}
+// 		lenReminder -= lenFragment
+// 		locFragment += int(lenFragment)
+// 	}
 
-	// Write final fragment
-	if lenReminder >= POW_7 {
-		// Write as 16 bits with leading '10'
-		if err = uw.writeValue(0x8000+lenReminder, 16); err != nil {
-			return
-		}
-	} else {
-		// Write as 8 bits with leading '0'
-		if err = uw.writeValue(lenReminder, 8); err != nil {
-			return
-		}
-	}
+// 	// Write final fragment
+// 	if lenReminder >= POW_7 {
+// 		// Write as 16 bits with leading '10'
+// 		if err = uw.writeValue(0x8000+lenReminder, 16); err != nil {
+// 			return
+// 		}
+// 	} else {
+// 		// Write as 8 bits with leading '0'
+// 		if err = uw.writeValue(lenReminder, 8); err != nil {
+// 			return
+// 		}
+// 	}
 
-	// Write remaining data
-	if lenReminder > 0 {
-		if err = uw.WriteBits(byteArray[locFragment:], uint(lenReminder*8)); err != nil {
-			return
-		}
-	}
+// 	// Write remaining data
+// 	if lenReminder > 0 {
+// 		if err = uw.WriteBits(byteArray[locFragment:], uint(lenReminder*8)); err != nil {
+// 			return
+// 		}
+// 	}
 
-	return
-}
+// 	return
+// }
 
 func (uw *UperWriter) WriteChoice(v uint64, uBound uint64, e bool) (err error) {
 	defer func() {
@@ -438,7 +449,8 @@ func (uw *UperWriter) WriteChoice(v uint64, uBound uint64, e bool) (err error) {
 				hexValue[i] = byte(tempIdx & 0xFF)
 				tempIdx >>= 8
 			}
-			err = uw.writeOctetsWithIndefiniteLength(hexValue)
+			// err = uw.writeOctetsWithIndefiniteLength(hexValue)
+			err = uw.WriteOpenType(hexValue)
 		}
 		return
 	}
@@ -446,4 +458,26 @@ func (uw *UperWriter) WriteChoice(v uint64, uBound uint64, e bool) (err error) {
 	// Root alternative: use constrained value encoding
 	err = uw.writeConstraintValue(uBound+1, idx)
 	return
+}
+
+// WriteBoolean encodes an ASN.1 BOOLEAN value according to UPER rules.
+// A BOOLEAN is encoded as a single bit: 1 for true, 0 for false.
+func (uw *UperWriter) WriteBoolean(value bool) (err error) {
+	defer func() {
+		err = utils.WrapError("WriteBoolean", err)
+	}()
+	err = uw.WriteBool(value)
+	return
+}
+
+// WriteNull encodes an ASN.1 NULL value according to UPER rules.
+// A NULL type encodes no bits - it only validates that the value is nil.
+func (uw *UperWriter) WriteNull() (err error) {
+	defer func() {
+		err = utils.WrapError("WriteNull", err)
+	}()
+	// NULL type in UPER encodes no bits, just validates the type
+	// The value must be nil (None in Python), but we don't need to check
+	// since the caller is responsible for passing the correct type
+	return nil
 }

@@ -347,66 +347,66 @@ func (ur *UperReader) ReadEnumerate(c Constraint, e bool) (v uint64, err error) 
 }
 
 // readOctetsWithIndefiniteLength reads octets using indefinite length encoding
-func (ur *UperReader) readOctetsWithIndefiniteLength() (byteArray []byte, err error) {
-	defer func() {
-		err = utils.WrapError("readOctetsWithIndefiniteLength", err)
-	}()
+// func (ur *UperReader) readOctetsWithIndefiniteLength() (byteArray []byte, err error) {
+// 	defer func() {
+// 		err = utils.WrapError("readOctetsWithIndefiniteLength", err)
+// 	}()
 
-	var result bytes.Buffer
-	more := true
+// 	var result bytes.Buffer
+// 	more := true
 
-	for more {
-		var first uint64
-		if first, err = ur.readValue(8); err != nil {
-			return
-		}
+// 	for more {
+// 		var first uint64
+// 		if first, err = ur.readValue(8); err != nil {
+// 			return
+// 		}
 
-		if (first & POW_7) == 0 {
-			// 7-bit value: final fragment
-			length := first & 0x7F
-			if length == 0 {
-				more = false
-				break
-			}
-			var fragment []byte
-			if fragment, err = ur.ReadBits(uint(length * 8)); err != nil {
-				return
-			}
-			result.Write(fragment)
-			more = false
-		} else if (first & POW_6) == 0 {
-			// 14-bit value: final fragment
-			var second uint64
-			if second, err = ur.readValue(8); err != nil {
-				return
-			}
-			length := ((first & 63) << 8) | second
-			var fragment []byte
-			if fragment, err = ur.ReadBits(uint(length * 8)); err != nil {
-				return
-			}
-			result.Write(fragment)
-			more = false
-		} else {
-			// Fragment header: 0xC0 + idx
-			idx := first & 63
-			if idx < 1 || idx > 4 {
-				err = ErrInvalidLength
-				return
-			}
-			length := POW_14 * idx
-			var fragment []byte
-			if fragment, err = ur.ReadBits(uint(length * 8)); err != nil {
-				return
-			}
-			result.Write(fragment)
-			// Continue reading more fragments
-		}
-	}
+// 		if (first & POW_7) == 0 {
+// 			// 7-bit value: final fragment
+// 			length := first & 0x7F
+// 			if length == 0 {
+// 				more = false
+// 				break
+// 			}
+// 			var fragment []byte
+// 			if fragment, err = ur.ReadBits(uint(length * 8)); err != nil {
+// 				return
+// 			}
+// 			result.Write(fragment)
+// 			more = false
+// 		} else if (first & POW_6) == 0 {
+// 			// 14-bit value: final fragment
+// 			var second uint64
+// 			if second, err = ur.readValue(8); err != nil {
+// 				return
+// 			}
+// 			length := ((first & 63) << 8) | second
+// 			var fragment []byte
+// 			if fragment, err = ur.ReadBits(uint(length * 8)); err != nil {
+// 				return
+// 			}
+// 			result.Write(fragment)
+// 			more = false
+// 		} else {
+// 			// Fragment header: 0xC0 + idx
+// 			idx := first & 63
+// 			if idx < 1 || idx > 4 {
+// 				err = ErrInvalidLength
+// 				return
+// 			}
+// 			length := POW_14 * idx
+// 			var fragment []byte
+// 			if fragment, err = ur.ReadBits(uint(length * 8)); err != nil {
+// 				return
+// 			}
+// 			result.Write(fragment)
+// 			// Continue reading more fragments
+// 		}
+// 	}
 
-	byteArray = result.Bytes()
-	return
-}
+// 	byteArray = result.Bytes()
+// 	return
+// }
 
 func (ur *UperReader) ReadChoice(uBound uint64, e bool) (v uint64, err error) {
 	defer func() {
@@ -440,7 +440,8 @@ func (ur *UperReader) ReadChoice(uBound uint64, e bool) (v uint64, err error) {
 		} else {
 			// Large extension index (>63): read indefinite length octets
 			var hexValue []byte
-			if hexValue, err = ur.readOctetsWithIndefiniteLength(); err != nil {
+			// if hexValue, err = ur.readOctetsWithIndefiniteLength(); err != nil {
+			if hexValue, err = ur.ReadOpenType(); err != nil {
 				return
 			}
 			length := len(hexValue)
@@ -457,4 +458,24 @@ func (ur *UperReader) ReadChoice(uBound uint64, e bool) (v uint64, err error) {
 
 	v = idx + 1 // Convert back to 1-based
 	return
+}
+
+// ReadBoolean decodes an ASN.1 BOOLEAN value according to UPER rules.
+// A BOOLEAN is decoded from a single bit: 1 for true, 0 for false.
+func (ur *UperReader) ReadBoolean() (value bool, err error) {
+	defer func() {
+		err = utils.WrapError("ReadBoolean", err)
+	}()
+	value, err = ur.ReadBool()
+	return
+}
+
+// ReadNull decodes an ASN.1 NULL value according to UPER rules.
+// A NULL type decodes no bits - it simply returns nil.
+func (ur *UperReader) ReadNull() (err error) {
+	defer func() {
+		err = utils.WrapError("ReadNull", err)
+	}()
+	// NULL type in UPER decodes no bits, just returns nil
+	return nil
 }

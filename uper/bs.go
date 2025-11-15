@@ -13,9 +13,10 @@ const (
 
 /********** BITSTREAM WRITER (UPER - NO ALIGNMENT) ***************/
 type bitstreamWriter struct {
-	w     io.Writer
-	b     [1]byte
-	index uint8 //number of written bits in the buffer/index of the next bit to write [0:7]
+	w       io.Writer
+	b       [1]byte
+	index   uint8 //number of written bits in the buffer/index of the next bit to write [0:7]
+	written bool  //track if any bytes have been written (to match Python: if len(buffer) == 0)
 }
 
 func NewBitStreamWriter(w io.Writer) *bitstreamWriter {
@@ -34,6 +35,7 @@ func (bs *bitstreamWriter) flush() error {
 		if _, err := bs.w.Write([]byte{v}); err != nil {
 			return err
 		}
+		bs.written = true
 		bs.index = 0
 		bs.b[0] = 0
 	}
@@ -104,11 +106,13 @@ func (bs *bitstreamWriter) WriteBits(content []byte, nbits uint) (err error) {
 		if _, err = bs.w.Write(buf); err != nil {
 			return
 		}
+		bs.written = true
 		bs.b[0] = 0
 	} else {
 		if _, err = bs.w.Write(buf[0 : nWriteBytes-1]); err != nil {
 			return
 		}
+		bs.written = true
 		bs.b[0] = buf[nWriteBytes-1]
 	}
 	return
