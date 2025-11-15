@@ -27,6 +27,7 @@ type OctetString []byte
 
 type Integer int64
 type Enumerated int64
+type NULL struct{}
 
 type Constraint struct {
 	Lb int64
