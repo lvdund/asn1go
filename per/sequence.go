@@ -217,7 +217,7 @@ func (sd *SequenceDecoder) IsComponentPresent(componentIndex int) bool {
 
 	// Find index in optional bitmap
 	optIdx := 0
-	for i := range componentIndex {
+	for i := 0; i < componentIndex; i++ {
 		if sd.constraints.RootComponents[i].Optional || sd.constraints.RootComponents[i].HasDefault {
 			optIdx++
 		}
@@ -246,7 +246,7 @@ func (sd *SequenceDecoder) DecodeExtensionAdditions() ([][]byte, error) {
 
 	// Decode extension presence bitmap
 	sd.extensionBitmap = make([]bool, numExtensions)
-	for i := range numExtensions {
+	for i := int64(0); i < numExtensions; i++ {
 		bit, err := sd.decoder.stream.ReadBit()
 		if err != nil {
 			return nil, &DecodeError{
@@ -260,7 +260,7 @@ func (sd *SequenceDecoder) DecodeExtensionAdditions() ([][]byte, error) {
 
 	// X.691 §19.9: decode extension addition values as open types (§11.2).
 	extensionValues := make([][]byte, 0)
-	for i := range numExtensions {
+	for i := int64(0); i < numExtensions; i++ {
 		if sd.extensionBitmap[i] {
 			value, err := sd.decoder.DecodeOpenType()
 			if err != nil {
@@ -271,4 +271,11 @@ func (sd *SequenceDecoder) DecodeExtensionAdditions() ([][]byte, error) {
 	}
 
 	return extensionValues, nil
+}
+
+func (sd *SequenceDecoder) IsExtensionPresent(index int) bool { /////////////////////////////////////
+	if index < 0 || index >= len(sd.extensionBitmap) {
+		return false
+	}
+	return sd.extensionBitmap[index]
 }

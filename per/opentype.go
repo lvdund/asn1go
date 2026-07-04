@@ -45,7 +45,7 @@ func (d *Decoder) DecodeOpenType() ([]byte, error) {
 		return nil, err
 	}
 	out := make([]byte, n)
-	for i := range n {
+	for i := int64(0); i < n; i++ {
 		octet, err := d.stream.ReadBits(8)
 		if err != nil {
 			return nil, &DecodeError{

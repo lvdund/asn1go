@@ -42,3 +42,13 @@ func (e *Encoder) Reset() {
 func (e *Encoder) Variant() Variant {
 	return e.variant
 }
+
+// WriteBytes writes the given bytes verbatim into the bit stream (8 bits each),
+// with no length prefix or alignment of its own. It is intended for carrying
+// already-encoded payloads verbatim (e.g. a pre-encoded open-type value that a
+// caller will re-wrap, or opaque field content).
+func (e *Encoder) WriteBytes(b []byte) {
+	for _, x := range b {
+		e.stream.WriteBits(uint64(x), 8)
+	}
+}

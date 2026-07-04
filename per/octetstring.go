@@ -230,7 +230,7 @@ func (d *Decoder) decodeExtensionOctetString() ([]byte, error) {
 // readOctetsUnaligned reads n octets without assuming octet alignment.
 func (d *Decoder) readOctetsUnaligned(n int) ([]byte, error) {
 	octets := make([]byte, n)
-	for i := range n {
+	for i := 0; i < n; i++ {
 		octet, err := d.stream.ReadBits(8)
 		if err != nil {
 			return nil, &DecodeError{
@@ -247,7 +247,7 @@ func (d *Decoder) readOctetsUnaligned(n int) ([]byte, error) {
 // readOctetsAligned reads n octets (assumes already aligned for APER).
 func (d *Decoder) readOctetsAligned(n int) ([]byte, error) {
 	octets := make([]byte, n)
-	for i := range n {
+	for i := 0; i < n; i++ {
 		octet, err := d.stream.ReadBits(8)
 		if err != nil {
 			return nil, &DecodeError{

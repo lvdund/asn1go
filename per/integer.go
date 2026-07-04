@@ -10,7 +10,7 @@ import (
 // - Single value (lb == ub): no bits emitted
 // - Constrained (R ≤ 255): fixed bits for range
 // - Constrained (R = 256): 1 octet, APER aligned
-// - Constrained (257 ≤ R ≤ 64K): 2 octets, APER aligned
+// - Constrained (257 ≤ R ≤ 64K): UPER uses ceil(log2(R)) bits, APER uses 2 octets
 // - Constrained (R > 64K): length determinant + minimum octets
 // - Semi-constrained (lb only): length determinant + offset octets
 // - Unconstrained: length determinant + 2's complement octets
@@ -104,9 +104,11 @@ func (e *Encoder) encodeConstrainedWholeNumber(value, lb, ub int64) error {
 
 	// X.691 Clause 13.2.2.4: Range 257-65536
 	if r <= 65536 {
-		if e.variant == APER {
-			e.stream.AlignToOctet()
+		if e.variant == UPER {
+			e.stream.WriteBits(offset, bitsNeeded(uint64(r)))
+			return nil
 		}
+		e.stream.AlignToOctet()
 		e.stream.WriteBits(offset>>8, 8)   // High byte
 		e.stream.WriteBits(offset&0xFF, 8) // Low byte
 		return nil
@@ -257,9 +259,16 @@ func (e *Encoder) encodeConstrainedWholeNumberBig(value, lb, ub *big.Int) error 
 
 	// X.691 Clause 13.2.2.4: Range 257-65536
 	if r.IsUint64() && r.Uint64() <= 65536 {
-		if e.variant == APER {
-			e.stream.AlignToOctet()
+		if e.variant == UPER {
+			bits := bitsNeededBig(r)
+			if offset.IsUint64() && bits <= 64 {
+				e.stream.WriteBits(offset.Uint64(), bits)
+			} else {
+				writeBitsBig(e.stream, offset, bits)
+			}
+			return nil
 		}
+		e.stream.AlignToOctet()
 		o := offset.Uint64()
 		e.stream.WriteBits(o>>8, 8)   // High byte
 		e.stream.WriteBits(o&0xFF, 8) // Low byte
@@ -466,13 +475,22 @@ func (d *Decoder) decodeConstrainedWholeNumber(lb, ub int64) (int64, error) {
 
 	// Range 257-65536
 	if r <= 65536 {
-		if d.variant == APER {
-			// Read alignment padding
-			for d.stream.Position()%8 != 0 {
-				_, err := d.stream.ReadBit()
-				if err != nil {
-					return 0, err
+		if d.variant == UPER {
+			offset, err := d.stream.ReadBits(bitsNeeded(uint64(r)))
+			if err != nil {
+				return 0, &DecodeError{
+					TypeName: "INTEGER",
+					Reason:   "failed to read constrained integer",
+					Position: d.stream.Position(),
 				}
+			}
+			return lb + int64(offset), nil
+		}
+		// Read alignment padding
+		for d.stream.Position()%8 != 0 {
+			_, err := d.stream.ReadBit()
+			if err != nil {
+				return 0, err
 			}
 		}
 		high, err := d.stream.ReadBits(8)
@@ -673,11 +691,21 @@ func (d *Decoder) decodeConstrainedWholeNumberBig(lb, ub *big.Int) (*big.Int, er
 
 	// Range 257-65536
 	if r.IsUint64() && r.Uint64() <= 65536 {
-		if d.variant == APER {
-			for d.stream.Position()%8 != 0 {
-				if _, err := d.stream.ReadBit(); err != nil {
-					return nil, err
+		if d.variant == UPER {
+			bits := bitsNeededBig(r)
+			offset, err := readBitsBig(d.stream, bits)
+			if err != nil {
+				return nil, &DecodeError{
+					TypeName: "INTEGER",
+					Reason:   "failed to read constrained integer",
+					Position: d.stream.Position(),
 				}
+			}
+			return new(big.Int).Add(lb, offset), nil
+		}
+		for d.stream.Position()%8 != 0 {
+			if _, err := d.stream.ReadBit(); err != nil {
+				return nil, err
 			}
 		}
 		high, err := d.stream.ReadBits(8)

@@ -123,7 +123,7 @@ func (d *Decoder) DecodeObjectIdentifier() (ObjectIdentifier, error) {
 
 	// 3. Read content octets
 	contentOctets := make([]byte, n)
-	for i := range n {
+	for i := int64(0); i < n; i++ {
 		bits, err := d.stream.ReadBits(8)
 		if err != nil {
 			return ObjectIdentifier{}, fmt.Errorf("OID: failed to read octet at %d: %w", i, err)
